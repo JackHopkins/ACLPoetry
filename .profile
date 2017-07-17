@@ -1,0 +1,1 @@
+export PATH="/Users/jack/Downloads/ngrok 2:/Users/jack/.rvm/gems/jruby-1.7.20/bin:/Users/jack/.rvm/gems/jruby-1.7.20@global/bin:/Users/jack/.rvm/rubies/jruby-1.7.20/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/Jack/Downloads:/opt/X11/bin:/usr/texbin:/Users/Jack/Downloads/play-2.2.3:/Users/jack/.rvm/bin"
