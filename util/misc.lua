@@ -11,6 +11,10 @@ function clone_list(tensor_list, zero_too)
     end
     return out
 end
+function file_exists(name)
+   local f=io.open(name,"r")
+   if f~=nil then io.close(f) return true else return false end
+end
 function count(object) 
   local count = 0
   for i,v in pairs(object) do 

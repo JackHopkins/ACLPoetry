@@ -35,7 +35,7 @@ end
 
       -- return the probability of one path, and the length of that path
      local local_prob, local_length = self:forward(line, index+1, clipped_stress, probability*v, len+length)
-     --print(line[index].."-"..len.." - "..localProb)
+  
      n_probability = n_probability + local_prob
      if local_length > max_length then max_length = local_length end
     end
@@ -65,7 +65,7 @@ end
 
     local probability, max_length = self:get_line_stress_probability(line, long_stress)
   
- -- print("max_length - "..max_length)
+
   if max_length ~= 0 then
     return true, probability, max_length
   else
@@ -87,7 +87,7 @@ end
     for k, v in pairs(self._et[word]) do
       local sub_pattern = stress_pattern
       local actual = v[1]
-      --print(#stress_pattern..'-'..#actual )
+      
      if #stress_pattern > #actual then
         sub_pattern = string.sub(stress_pattern, 0, #actual)
       else
@@ -104,8 +104,7 @@ end
       end
 
     end
-    --print(probability)
-   --print("time:"..(os.clock()*10) - millis)
+
     return probability
   end
 

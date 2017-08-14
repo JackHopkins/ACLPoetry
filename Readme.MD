@@ -29,6 +29,7 @@ luarocks install nn
 luarocks install optim
 luarocks install lua-cjson
 luarocks install hdf5
+luarocks install paths
 #luarocks install cutorch
 
 source ~/torch-cl/install/bin/torch-activate
@@ -41,4 +42,6 @@ git clone --recursive https://github.com/graehl/carmel.git ~/graehl
 cd graehl/carmel; sudo make -j 4 install BOOST_SUFFIX= INSTALL_PREFIX=/usr/local
 
 git clone --recursive https://github.com/JackHopkins/ACLPoetry.git ~/ACLPoetry
+
+git clone --recursive https://github.com/rotmanmi/glove.torch ~/glove.torch
 ~~~

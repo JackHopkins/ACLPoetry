@@ -14,11 +14,13 @@ require 'optim'
 require 'lfs'
 require 'carmel'
 
+
 require 'util.OneHot'
 require 'util.misc'
 require 'util.stack'
 require 'util.wfst'
 local WordSplitLMMinibatchLoader = require 'util.WordSplitLMMinibatchLoader'
+
 
 cmd = torch.CmdLine()
 cmd:text()
@@ -32,36 +34,41 @@ cmd:option('-seed',123,'random number generator\'s seed')
 cmd:option('-sample',1,' 0 to use max at each timestep, 1 to sample at each timestep')
 cmd:option('-primetext',"",'used as a prompt to "seed" the state of the LSTM using a given sequence, before we sample.')
 cmd:option('-length',2000,'number of characters to sample')
-cmd:option('-temp_mean',0.5,'temperature of sampling')
-cmd:option('-temp_dev', 0, 'how much the temperature varies')
+cmd:option('-temp_mean',0.8,'temperature of sampling')
+cmd:option('-temp_dev', 0.3, 'how much the temperature varies')
 cmd:option('-gpuid',-1,'which gpu to use. -1 = use CPU')
 cmd:option('-opencl',1,'use OpenCL (instead of CUDA)')
 cmd:option('-verbose',0,'set to 0 to ONLY print the sampled text, no diagnostics')
 cmd:option('-stress_strictness',0,'numbers of allowed rhythmic mistakes. -1 is least strict.')
-cmd:option('-name','results', 'name of result file')
+cmd:option('-name','results3', 'name of result file')
 cmd:option('-syllables',10,'number of syllables per line')
 cmd:option('-pattern', "*/", 'stress pattern')
-cmd:option('-alliteration', 3, 'alliteration coefficient')
-cmd:option('-branchingFactor', 10, 'How many solutions we keep in the beam.')
-cmd:option('-theme', "cold", "A theme word to guide the poetry sampling.")
+cmd:option('-alliteration', 20, 'alliteration coefficient')
+cmd:option('-branchingFactor', 5, 'How many solutions we keep in the beam.')
+cmd:option('-theme', "desolation", "A theme word to guide the poetry sampling.")
 cmd:option('-form', 0.5, "The weighting of form with respect to content")
 cmd:option('-carmel', 0, "Whether to use the Carmel library")
 cmd:option('-carmel_dir', '/Users/jack/Documents/workspace/Poebot/graehl/carmel/bin/macosx')
 cmd:option('-wfst', '/Users/jack/Documents/workspace/Poebot/torch-rnn/torch-rnn/wfst005.full.txt')
 cmd:option('-output_dir', '/Users/jack/Documents/workspace/Poebot/lstm/src/data/')
+cmd:option('-glove', '/Users/jack/Downloads/glove.6B3/glove.6B.100d.txt', 'pre-trained GloVe word embeddings')
+cmd:option('-glove_output', '/Users/jack/Documents/workspace/Poebot/lstm/src/data/glove.t7', 'GloVe wrapper cache')
 cmd:text()
 
 -- parse input params
 opt = cmd:parse(arg)
+
+--require 'bintot7'
+
 current_state = {}
 prediction = {}
 word_stack = Stack:Create()
 lines = 0
---temperature = opt.temperature
 drift = 0
 theme = {}
 
 
+-- create a pronunciation model 
 if opt.carmel == 0 then
 pronunciation_model = WFST:Create()
 pronunciation_model:load(opt.wfst)
@@ -69,7 +76,12 @@ else
 pronunciation_model = Carmel:Create(opt.carmel, opt.wfst)
 end
 
+-- load similar words
+local glove = require 'glove'
+local k = 20
+neighbors = glove:distance(glove:word2vec(opt.theme),k)
 
+-- construct a rhythmic pattern archetype
 long_pattern = ""
    for i=1, 20 do
         long_pattern=long_pattern..opt.pattern
@@ -82,20 +94,25 @@ end
 
 
 
-function create_theme_graph(theme_word)
+function create_theme_graph(theme_words, similarities, order)
+for k=1, #theme_words do
+  local theme_word = theme_words[k]
+
+  local similarity = similarities[k] * 10
 for i=1,string.len(theme_word)-1 do
-local head = string.sub(theme_word, i, i+1) 
-local tail = string.sub(theme_word, i+1)
+local tail = string.sub(theme_word, i, i+order-1) 
+local head = string.sub(theme_word, i+order, i+order)
 
 if not theme[tail] then theme[tail] = {} end
 if not theme[tail][head] then theme[tail][head] = 0 end
 
-if theme[tail][head] then
-theme[tail][head] = 1
+if not theme[tail][head] then
+theme[tail][head] = similarity
 else
 
-theme[tail][head] = theme[tail][head] + 1
+theme[tail][head] = theme[tail][head] + similarity
 
+end
 end
 end
 end
@@ -114,19 +131,23 @@ function word_stack_to_string(word_stack)
   return words
 end
 
-function boost_theme(probabilities, incomplete_word) 
-local theme_word = opt.theme
-if string.len(incomplete_word) > string.len(theme_word) then return probabilities end
+function boost_theme(probabilities, incomplete_word, order) 
+--local theme_word = opt.theme
+--if string.len(incomplete_word) > string.len(theme_word) then return probabilities end
 
-if incomplete_word == string.sub(theme_word, 1, string.len(incomplete_word)) then
+--if incomplete_word == string.sub(theme_word, 1, string.len(incomplete_word)) then
 
---  print(theme[incomplete_word])
-  if theme[incomplete_word] then
-  for key,value in pairs(theme[incomplete_word]) do
-      probabilities[vocab[key]] = 1--probabilities[vocab[key]] * value * theme_constant
+  local word_frag = string.sub(incomplete_word, -order)
+  
+  if theme[word_frag] then
+  for key,value in pairs(theme[word_frag]) do
+      if vocab[key] then
+      probabilities[vocab[key]] = value--probabilities[vocab[key]] * value * theme_constant
+     
+    end
   end
-end
-end
+  end
+--end
   return probabilities
 end
 
@@ -160,9 +181,12 @@ local total_probability = 1
         -- use sampling
         prediction:div(temperature) -- scale by temperature
 
-        local probs = boost_theme(torch.exp(prediction):squeeze(), word)
+        local probs = boost_theme(torch.exp(prediction):squeeze(), word, 3)
+        if torch.sum(probs) == 0 then goto continue end
         probs = alliteration(probs, word_stack, word)
         if torch.sum(probs) == 0 then goto continue end
+        
+        
         probs:div(torch.sum(probs)) -- renormalize so probs sum to one
         prev_char = torch.multinomial(probs:float(), 1):resize(1):float()
         total_probability = total_probability*probs[prev_char[1]]
@@ -191,11 +215,14 @@ local total_probability = 1
     
     --If a space has been found, 
     if char == " " then 
-        --and the word solely consists of that character
+        --and nothing has been sampled previously in this word
         if #word == 1 then
+          -- then resample
+          print('\n Oh no, resampling \n')
           goto continue
           --or the word is longer than 1
         elseif #word > 1 then
+          --keep sampled character
         break
         end
     end 
@@ -272,8 +299,8 @@ end
 if opt.gpuid >= 0 and opt.opencl == 1 then
     local ok, cunn = pcall(require, 'clnn')
     local ok2, cutorch = pcall(require, 'cltorch')
-    if not ok then print('package clnn not found!') end
-    if not ok2 then print('package cltorch not found!') end
+    if not ok then gprint('package clnn not found!') end
+    if not ok2 then gprint('package cltorch not found!') end
     if ok and ok2 then
         gprint('using OpenCL on GPU ' .. opt.gpuid .. '...')
         gprint('Make sure that your saved checkpoint was also trained with GPU. If it was trained with CPU use -gpuid -1 for sampling as well')
@@ -361,9 +388,9 @@ function prune(candidates, max)
       new_candidates[sortedKeys[k]] = candidates[sortedKeys[k]]
     end
   end
-  print(max)
-  print(tablelength(candidates))
-  print(tablelength(new_candidates))
+  --print(max)
+  --print(tablelength(candidates))
+  --print(tablelength(new_candidates))
 
   --for i = 1, max do 
   --  new_candidates[sortedKeys[i]] = candidates[sortedKeys[i]]
@@ -376,10 +403,11 @@ end
 
 function choose_temperature()
   local temperature = 0
-    while temperature <= 0 or temperature > 1 do
+    while temperature <= 0.1 or temperature > 1 or temperature == nil do
         temperature = opt.temp_mean + (math.sqrt(-2 * math.log(math.random())) * math.cos(2 * math.pi * math.random()) * opt.temp_dev)
     end
     if temperature == nil then return 1 end
+
     return temperature
   end
 -- For every candidate, sample another word 
@@ -389,7 +417,7 @@ function beam_search(candidates, stress_implementation)
   
     --By varying the temperature each line is samples at, we can better traverse the search space
     local temperature = choose_temperature()
-  --  print(temperature)
+   
 
     local candidate = sample_line(value.stack, value.probabilities, candidates, temperature, stress_implementation)
     
@@ -441,7 +469,7 @@ function sample_line(word_stack, probability_stack, candidates, temperature)
   probability_stack_n:push(word_probability)
 
 words = sanitise(word_stack_to_string(word_stack_n))
---print("words: "..words)
+
 local matches = true
 local score = 0
 local syllables = 0
@@ -476,7 +504,13 @@ attempts = 0
 
 
 ::start::
-create_theme_graph(opt.theme)
+gprint('sampling lines with a ' .. opt.pattern .. ' stress pattern...')
+gprint('beginning beam search with ' .. opt.branchingFactor .. ' width...')
+
+--print(neighbors[1])
+--print(neighbors[2])
+
+create_theme_graph(neighbors[2], neighbors[1], 3)
 
 local candidates = {}
 local temperatures = {}
@@ -484,7 +518,7 @@ seed_candidates(candidates)
 
 
 while(true) do
-  candidates = beam_search(candidates, carmel)
+  candidates = beam_search(candidates, pronunciation_model)
 
   if tablelength(candidates) >= opt.branchingFactor then 
   candidates = prune(candidates, opt.branchingFactor)

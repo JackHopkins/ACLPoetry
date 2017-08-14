@@ -1,1 +1,6 @@
 *.t7
+phonemodel
+wordmodel
+data
+cv
+src
